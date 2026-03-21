@@ -1,0 +1,18 @@
+name: RSS Digest
+on:
+  schedule:
+    - cron: '0 1 _ _ *'
+  workflow_dispatch:
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install feedparser requests
+      - run: python rss_digest.py
+        env:
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
