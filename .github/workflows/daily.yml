@@ -1,7 +1,7 @@
 name: RSS Digest
 on:
   schedule:
-    - cron: '0 1 _ _ *'
+    - cron: '0 1 * * *'
   workflow_dispatch:
 jobs:
   digest:
