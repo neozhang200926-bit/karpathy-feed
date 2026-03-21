@@ -1,4 +1,4 @@
-  import feedparser, requests, os
+import feedparser, requests, os
   from datetime import datetime, timezone, timedelta
 
   SLACK_TOKEN = os.environ["SLACK_TOKEN"]
@@ -64,14 +64,14 @@
       article_list = "\n".join([f"- [{a['source']}] {a['title']} {a['link']}" for a in
   articles])
       prompt = f"你是 Andrej Karpathy
-  风格的技术信息策展人。信噪比优先。\n\n今天的新文章：\n{article_list}\n\n请整理成每日技术雷达
-  ，按分类列出，每条附一句洞见，最后给出今日必读。600字以内，中文。"
+  风格的技术信息策展人。信噪比优先。\n\n今天的新文章：\n{article_list}\n\n请整理成每日技
+  术雷达，按分类列出，每条附一句洞见，最后给出今日必读。600字以内，中文。"
       r = requests.post(
           "https://api.deepseek.com/chat/completions",
           headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type":
   "application/json"},
-          json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
-  "max_tokens": 800}
+          json={"model": "deepseek-chat", "messages": [{"role": "user", "content":
+  prompt}], "max_tokens": 800}
       )
       return r.json()["choices"][0]["message"]["content"]
 
