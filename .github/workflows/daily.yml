@@ -1,10 +1,26 @@
-name: RSS Digest
+name: RSS & A股 Digest
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 1 * * *'    # 北京时间 09:00 — 每日 RSS 摘要
+    - cron: '30 3 * * 1-5' # 北京时间 11:30 — A股早盘收盘（周一至周五）
+    - cron: '0 7 * * 1-5'  # 北京时间 15:00 — A股全天收盘（周一至周五）
   workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式'
+        required: false
+        default: 'rss'
+        type: choice
+        options:
+          - rss
+          - astock_morning
+          - astock_afternoon
+
 jobs:
-  digest:
+  rss-digest:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 1 * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'rss')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -14,5 +30,49 @@ jobs:
       - run: pip install feedparser requests
       - run: python rss_digest.py
         env:
+          MODE: rss
           SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
+
+  astock-morning:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '30 3 * * 1-5') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'astock_morning')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install requests akshare
+      - run: python rss_digest.py
+        env:
+          MODE: astock_morning
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
+
+  astock-afternoon:
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 7 * * 1-5') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'astock_afternoon')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install requests akshare
+      - run: python rss_digest.py
+        env:
+          MODE: astock_afternoon
+          SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_USER_ID: ${{ secrets.FEISHU_USER_ID }}
