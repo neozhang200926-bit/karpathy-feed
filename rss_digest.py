@@ -50,28 +50,57 @@ FEEDS = [
     ("Gary Marcus", "https://garymarcus.substack.com/feed/"),
     ("Matt Stoller", "https://www.thebignewsletter.com/feed/"),
     ("Construction Physics", "https://www.construction-physics.com/feed/"),
+    # 中文财经
+    ("财新网", "https://www.caixin.com/rss20.xml"),
+    ("36氪", "https://36kr.com/feed"),
 ]
+
+SEEN_URLS_FILE = "seen_urls.json"
+SEEN_URLS_TTL_DAYS = 7
+
+
+def load_seen_urls():
+    if not os.path.exists(SEEN_URLS_FILE):
+        return {}
+    with open(SEEN_URLS_FILE) as f:
+        return json.load(f)
+
+
+def save_seen_urls(seen):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=SEEN_URLS_TTL_DAYS)).isoformat()
+    pruned = {url: ts for url, ts in seen.items() if ts > cutoff}
+    with open(SEEN_URLS_FILE, "w") as f:
+        json.dump(pruned, f, ensure_ascii=False, indent=2)
 
 
 def get_recent_articles(hours=24):
+    seen = load_seen_urls()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     articles = []
+    now_ts = datetime.now(timezone.utc).isoformat()
     for name, url in FEEDS:
         try:
             feed = feedparser.parse(url)
             for entry in feed.entries[:3]:
                 pub = entry.get("published_parsed") or entry.get("updated_parsed")
                 if not pub:
-                    continue  # 跳过无日期条目，避免旧文章重复推送
+                    continue
                 pub_dt = datetime(*pub[:6], tzinfo=timezone.utc)
-                if pub_dt > cutoff:
-                    articles.append({
-                        "source": name,
-                        "title": entry.get("title", "无标题"),
-                        "link": entry.get("link", ""),
-                    })
+                if pub_dt <= cutoff:
+                    continue
+                link = entry.get("link", "")
+                if link in seen:
+                    print(f"[跳过重复] {name}: {entry.get('title', '')}")
+                    continue
+                articles.append({
+                    "source": name,
+                    "title": entry.get("title", "无标题"),
+                    "link": link,
+                })
+                seen[link] = now_ts
         except Exception as e:
             print(f"Error: {name}: {e}")
+    save_seen_urls(seen)
     return articles
 
 
