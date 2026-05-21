@@ -89,7 +89,7 @@ def get_recent_articles(hours=24):
                 if pub_dt <= cutoff:
                     continue
                 link = entry.get("link", "")
-                if link in seen:
+                if link and link in seen:
                     print(f"[跳过重复] {name}: {entry.get('title', '')}")
                     continue
                 articles.append({
@@ -97,7 +97,8 @@ def get_recent_articles(hours=24):
                     "title": entry.get("title", "无标题"),
                     "link": link,
                 })
-                seen[link] = now_ts
+                if link:
+                    seen[link] = now_ts
         except Exception as e:
             print(f"Error: {name}: {e}")
     save_seen_urls(seen)
@@ -258,9 +259,12 @@ if __name__ == "__main__":
         print("=== 每日技术 RSS 摘要 ===")
         articles = get_recent_articles(hours=24)
         print(f"找到 {len(articles)} 篇新文章")
-        digest = generate_digest(articles)
-        print(digest)
-        send_to_slack(digest)
-        send_to_feishu(digest)
+        if not articles:
+            print("无新文章，跳过推送")
+        else:
+            digest = generate_digest(articles)
+            print(digest)
+            send_to_slack(digest)
+            send_to_feishu(digest)
 
     print("完成！")
