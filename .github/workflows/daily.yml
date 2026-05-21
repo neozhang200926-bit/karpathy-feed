@@ -47,7 +47,7 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - run: pip install requests akshare
+      - run: pip install feedparser requests akshare
       - run: python rss_digest.py
         env:
           MODE: astock_morning
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-      - run: pip install requests akshare
+      - run: pip install feedparser requests akshare
       - run: python rss_digest.py
         env:
           MODE: astock_afternoon
