@@ -1,4 +1,4 @@
-import feedparser, requests, os, json, sys
+import feedparser, requests, os, json, sys, time
 from datetime import datetime, timezone, timedelta
 
 SLACK_TOKEN = os.environ.get("SLACK_TOKEN", "")
@@ -105,6 +105,32 @@ def get_recent_articles(hours=24):
     return articles
 
 
+def call_deepseek(prompt, max_tokens, timeout):
+    """调用 DeepSeek API：3 次自动重试 + 错误判断。成功返回文本，失败返回 None。"""
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+                json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens},
+                timeout=timeout,
+            )
+            if r.status_code != 200:
+                print(f"[DeepSeek] 第{attempt}次尝试 HTTP {r.status_code}: {r.text[:200]}")
+            else:
+                data = r.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content")
+                if content:
+                    return content
+                print(f"[DeepSeek] 第{attempt}次尝试响应无 choices/content: {r.text[:200]}")
+        except Exception as e:
+            print(f"[DeepSeek] 第{attempt}次尝试异常: {e}")
+        if attempt < 3:
+            time.sleep(2 * attempt)
+    print("[DeepSeek] 3 次重试均失败")
+    return None
+
+
 def generate_digest(articles):
     if not articles:
         return "今日暂无新文章"
@@ -114,13 +140,10 @@ def generate_digest(articles):
         f"今天的新文章：\n{article_list}\n\n"
         "请整理成每日技术雷达，按分类列出，每条附一句洞见，最后给出今日必读。600字以内，中文。"
     )
-    r = requests.post(
-        "https://api.deepseek.com/chat/completions",
-        headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
-        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 800},
-        timeout=30,
-    )
-    return r.json()["choices"][0]["message"]["content"]
+    result = call_deepseek(prompt, max_tokens=800, timeout=30)
+    if not result:
+        return "⚠️ 今日摘要生成失败（DeepSeek API 异常），以下为原文列表供参考：\n\n" + article_list
+    return result
 
 
 # ── A股行情 ────────────────────────────────────────────────────────────────────
@@ -176,13 +199,11 @@ def generate_astock_digest(indices, session_label):
         f"以下是今日A股{session_label}主要指数数据：\n{lines}\n\n"
         "请用100字以内中文做一句话市场概括，点出今日最关键的走势特征，语气客观简洁。"
     )
-    r = requests.post(
-        "https://api.deepseek.com/chat/completions",
-        headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
-        json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": 150},
-        timeout=20,
-    )
-    comment = r.json()["choices"][0]["message"]["content"].strip()
+    comment = call_deepseek(prompt, max_tokens=150, timeout=20)
+    if not comment:
+        comment = "（市场概括生成失败，DeepSeek API 异常）"
+    else:
+        comment = comment.strip()
 
     header = f"📊 A股{session_label}行情\n{'─'*28}\n"
     body = "\n".join([f"{i['name']}  {i['price']}  {i['pct']}" for i in indices])
