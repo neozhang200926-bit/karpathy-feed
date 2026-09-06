@@ -2,7 +2,10 @@ import feedparser, requests, os, json, sys, time
 from datetime import datetime, timezone, timedelta
 
 SLACK_TOKEN = os.environ.get("SLACK_TOKEN", "")
-DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
+# LLM 端点（默认 ClawPA 集群，经 tailnet 100.86.225.99:3001 访问）
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://100.86.225.99:3001/v1")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "DeepSeekV4-Flash")
 FEISHU_APP_ID = os.environ.get("FEISHU_APP_ID", "cli_a934f8ea79f8dcc6")
 FEISHU_APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 FEISHU_USER_ID = os.environ.get("FEISHU_USER_ID", "ou_73841a2902b303bd000cdc3011fd5c63")
@@ -105,29 +108,32 @@ def get_recent_articles(hours=24):
     return articles
 
 
-def call_deepseek(prompt, max_tokens, timeout):
-    """调用 DeepSeek API：3 次自动重试 + 错误判断。成功返回文本，失败返回 None。"""
+def call_llm(prompt, max_tokens, timeout):
+    """调用 LLM（OpenAI 兼容，默认 ClawPA DeepSeekV4-Flash）：3 次自动重试 + 错误判断。成功返回文本，失败返回 None。"""
+    if not LLM_API_KEY:
+        print("[LLM] 未配置 LLM_API_KEY，跳过生成")
+        return None
     for attempt in range(1, 4):
         try:
             r = requests.post(
-                "https://api.deepseek.com/chat/completions",
-                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
-                json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens},
+                f"{LLM_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"},
+                json={"model": LLM_MODEL, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens},
                 timeout=timeout,
             )
             if r.status_code != 200:
-                print(f"[DeepSeek] 第{attempt}次尝试 HTTP {r.status_code}: {r.text[:200]}")
+                print(f"[LLM] 第{attempt}次尝试 HTTP {r.status_code}: {r.text[:200]}")
             else:
                 data = r.json()
                 content = data.get("choices", [{}])[0].get("message", {}).get("content")
                 if content:
                     return content
-                print(f"[DeepSeek] 第{attempt}次尝试响应无 choices/content: {r.text[:200]}")
+                print(f"[LLM] 第{attempt}次尝试响应无 choices/content: {r.text[:200]}")
         except Exception as e:
-            print(f"[DeepSeek] 第{attempt}次尝试异常: {e}")
+            print(f"[LLM] 第{attempt}次尝试异常: {e}")
         if attempt < 3:
             time.sleep(2 * attempt)
-    print("[DeepSeek] 3 次重试均失败")
+    print("[LLM] 3 次重试均失败")
     return None
 
 
@@ -140,9 +146,9 @@ def generate_digest(articles):
         f"今天的新文章：\n{article_list}\n\n"
         "请整理成每日技术雷达，按分类列出，每条附一句洞见，最后给出今日必读。600字以内，中文。"
     )
-    result = call_deepseek(prompt, max_tokens=800, timeout=30)
+    result = call_llm(prompt, max_tokens=4096, timeout=180)
     if not result:
-        return "⚠️ 今日摘要生成失败（DeepSeek API 异常），以下为原文列表供参考：\n\n" + article_list
+        return "⚠️ 今日摘要生成失败（LLM 异常），以下为原文列表供参考：\n\n" + article_list
     return result
 
 
@@ -159,29 +165,43 @@ ASTOCK_INDICES = [
 
 def get_astock_data():
     import akshare as ak
+    df, src = None, "em"
     try:
         df = ak.stock_zh_index_spot_em()
     except Exception as e:
-        print(f"[AStock] akshare 拉取失败: {e}")
-        return []
+        print(f"[AStock] 东方财富拉取失败({e})，改用新浪源")
+        src = "sina"
+        try:
+            df = ak.stock_zh_index_spot_sina()
+        except Exception as e2:
+            print(f"[AStock] 新浪源也失败: {e2}")
+            return []
 
     results = []
     for name, code in ASTOCK_INDICES:
-        row = df[df["代码"] == code]
-        if row.empty:
-            row = df[df["名称"].str.contains(name, na=False)]
+        if src == "em":
+            row = df[df["代码"] == code]
+            if row.empty:
+                row = df[df["名称"].str.contains(name, na=False)]
+        else:
+            row = df[df["代码"].str.endswith(code, na=False)]
+            if row.empty:
+                row = df[df["名称"].str.contains(name, na=False)]
         if row.empty:
             continue
         r = row.iloc[0]
         try:
             pct = float(r["涨跌幅"])
             arrow = "▲" if pct >= 0 else "▼"
+            amount = float(r["成交额"])
+            if amount > 1e8:  # 原始单位是元，转亿
+                amount /= 1e8
             results.append({
                 "name":   r["名称"],
                 "price":  r["最新价"],
                 "pct":    f"{arrow}{abs(pct):.2f}%",
                 "change": r["涨跌额"],
-                "amount": r["成交额"],
+                "amount": amount,
             })
         except Exception:
             continue
@@ -199,9 +219,9 @@ def generate_astock_digest(indices, session_label):
         f"以下是今日A股{session_label}主要指数数据：\n{lines}\n\n"
         "请用100字以内中文做一句话市场概括，点出今日最关键的走势特征，语气客观简洁。"
     )
-    comment = call_deepseek(prompt, max_tokens=150, timeout=20)
+    comment = call_llm(prompt, max_tokens=2048, timeout=180)
     if not comment:
-        comment = "（市场概括生成失败，DeepSeek API 异常）"
+        comment = "（市场概括生成失败，LLM 异常）"
     else:
         comment = comment.strip()
 
